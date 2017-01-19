@@ -35,7 +35,10 @@ char string_buf[MAX_STR_CONST]; /* to assemble string constants */
 char *string_buf_ptr;
 
 int string_buf_index = 0;
+int escape_length = 0;
 int comment_level = 0;
+
+bool string_error_flag = false;
 
 extern int curr_lineno;
 extern int verbose_flag;
@@ -55,7 +58,11 @@ extern YYSTYPE cool_yylval;
 DARROW          =>
 DIGITS		[0-9]+
 
-CLASS class|CLASS
+ /*
+  * Keywords
+  */
+
+CLASS [Cc][Ll][Aa][Ss][Ss]
 ELSE [Ee][Ll][Ss][Ee]
 FI [Ff][Ii]
 IF [Ii][Ff]
@@ -71,8 +78,9 @@ ESAC [Ee][Ss][Aa][Cc]
 OF [Oo][Ff]
 NEW [Nn][Ee][Ww]
 ISVOID [Ii][Ss][Vv][Oo][Ii][Dd]
+NOT [Nn][Oo][Tt]
+
 ASSIGN <-
-NOT not
 LE <=
 SPACE [ \f\r\t\v]+
 QUOTE "
@@ -81,7 +89,7 @@ FALSE	     f[aA][lL][sS][eE]
 TYPEID	[A-Z][a-zA-Z0-9_]*
 OBJECTID [a-z][a-zA-Z0-9_]*
 NEWLINE "\n"
-SINGLE_OPER [,\.;:\(\)\+\-\*\/\=\{\}\<]
+SINGLE_OPER [,\.;:\(\)\+\-\*\/~\@\=\{\}\<]
 STRING_CONST \"
 COMMENT_BEGIN "(*"
 COMMENT_END "*)"
@@ -98,10 +106,9 @@ SINGLE_LINE_COMMENT "--"
 {SINGLE_LINE_COMMENT} {BEGIN(SINGLE_LINE_COMMENT_CONTENT);}
 <SINGLE_LINE_COMMENT_CONTENT>"\n" { BEGIN(INITIAL); curr_lineno++; }
 <SINGLE_LINE_COMMENT_CONTENT><<EOF>> {
-	cool_yylval.error_msg = "EOF in comment";
-	return (ERROR);
+      BEGIN(INITIAL);
 }
-<SINGLE_LINE_COMMENT_CONTENT>. {}
+
 
  /*
   *  Nested comments
@@ -175,44 +182,60 @@ SINGLE_LINE_COMMENT "--"
 {SPACE}    ;
 {NEWLINE}  { curr_lineno++; }
 {SINGLE_OPER} { return yytext[0]; }
-{STRING_CONST} { BEGIN(STRING_CONST_CONTENT); string_buf_index = 0;}
+{STRING_CONST} { BEGIN(STRING_CONST_CONTENT); string_buf_index = 0; string_error_flag = false; escape_length = 0; }
 
 <STRING_CONST_CONTENT><<EOF>> { 
 		cool_yylval.error_msg = "EOF in string constant";
 		BEGIN(INITIAL);
+		string_error_flag = true;
 		return (ERROR);
 }
 <STRING_CONST_CONTENT>"\\b" |
 <STRING_CONST_CONTENT>"\\t" |
 <STRING_CONST_CONTENT>"\\n" |
 <STRING_CONST_CONTENT>"\\f" { 
-	string_buf[string_buf_index++] = yytext[0];
-	string_buf[string_buf_index++] = yytext[1];
+	char word = 0;
+	if(yytext[1] == 'b') word = '\b';
+	if(yytext[1] == 't') word = '\t';
+	if(yytext[1] == 'n') word = '\n';
+	if(yytext[1] == 'f') word = '\f';
+	string_buf[string_buf_index++] = word;
 }
-<STRING_CONST_CONTENT>"\\".	{	    string_buf[string_buf_index++] = yytext[1];
-}
-<STRING_CONST_CONTENT>"\\\n"	{	    curr_lineno++;
 
+<STRING_CONST_CONTENT>"\\\n"	{	    curr_lineno++; 
+				string_buf[string_buf_index++] = '\n';
+}
+
+<STRING_CONST_CONTENT>"\\\0"	{	   
+		    cool_yylval.error_msg = "String contains escaped null character.";
+		    string_error_flag = true;
+}
+
+<STRING_CONST_CONTENT>"\\".	{	    string_buf[string_buf_index++] = yytext[1]; 
 }
 
 <STRING_CONST_CONTENT>"\n" { 
 		    cool_yylval.error_msg = "Unterminated string constant";
+		    string_error_flag = true;
 		    BEGIN(INITIAL);
 		    return (ERROR);
 }
 
-<STRING_CONST_CONTENT>"\0" {
+<STRING_CONST_CONTENT>\0 {
 	            cool_yylval.error_msg = "String contains null character";
-		    return (ERROR);
+		    string_error_flag = true;
 }
 
 <STRING_CONST_CONTENT>\" {
-		if(string_buf_index >= MAX_STR_CONST) {
-	            cool_yylval.error_msg = "String constant too long";
-	            BEGIN(INITIAL);
-		    return (ERROR);
-		}
 		string_buf[string_buf_index++] = 0;
+		if(strlen(string_buf) >= MAX_STR_CONST) {
+	            cool_yylval.error_msg = "String constant too long";
+		    string_error_flag = true;
+		}
+		if(string_error_flag) {
+		    BEGIN(INITIAL);
+		    return (ERROR);		
+		}
 	        BEGIN(INITIAL);
 		cool_yylval.symbol = stringtable.add_string(string_buf);
 		return (STR_CONST);		 
