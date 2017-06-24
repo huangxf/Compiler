@@ -140,9 +140,10 @@
     %type <formals> formal_list
     %type <formal>   formal
     %type <expression> expression
-    %type <expression> id_type_expr_darrow
+    %type <expression> id_type_expr_item
+    %type <expression> id_type_expr_list
     %type <expression> id_type_expr_case
-    %type <expressions> id_type_expr_darrow_list
+    %type <expression> init_expression
     %type <expressions> id_type_expr_case_list
     %type <expressions> expression_list
     %type <expressions> expression_semi
@@ -225,23 +226,37 @@ expression_semi : expression ';'
 {$$ = append_Expressions($1, single_Expressions($2));}
 ;
 
-id_type_expr_darrow_list :
-{$$ = nil_Expressions();}
-| id_type_expr_darrow
-{$$ = single_Expressions($1);}
-| id_type_expr_darrow_list ',' id_type_expr_darrow
-{$$ = append_Expressions($1, single_Expressions($3));}
+init_expression :
+{$$ = no_expr();}
+| id_type_expr_list
+{$$ = $1;}
+| ASSIGN expression
+{$$ = $2;}
+| ASSIGN expression id_type_expr_list
+{$$ = $3;}
 ;
 
-id_type_expr_darrow : OBJECTID ':' TYPEID
+id_type_expr_item : 
+{$$ = no_expr();}
+| ',' OBJECTID ':' TYPEID
 { @$ = @1;
-  $$ = object($1);
+  $$ = object($2);
 }
-| OBJECTID ':' TYPEID ASSIGN expression
+| ','  OBJECTID ':' TYPEID ASSIGN expression
 { @$ = @1;
-  $$ = assign($1, $5);
+  $$ = assign($2, $6);
 }
 ;
+
+id_type_expr_list :
+id_type_expr_item 
+{
+  $$ = $1;
+}
+| id_type_expr_list id_type_expr_item
+{
+  $$ = $2;
+}
 
 id_type_expr_case_list: id_type_expr_case ';'
 {}
@@ -255,57 +270,127 @@ id_type_expr_case: OBJECTID ':' TYPEID DARROW expression
 
 
 expression : OBJECTID ASSIGN expression 
-{@$ = @1;}
-| OBJECTID ':' TYPEID
-{@$ = @1;}
+{@$ = @1;
+  $$ = assign($1, $3);
+}
+| expression OBJECTID '@' TYPEID '.' OBJECTID  '(' expression_list ')'
+{
+  @$ = @1;
+  static_dispatch($1, $4, $6, $8);
+}
 | expression '.' OBJECTID '(' expression_list ')'
-{@$ = @1;}
+{
+  @$ = @1;
+  $$ = dispatch($1, $3, $5);
+}
 | OBJECTID '(' expression_list ')'
-{@$ = @1;}
+{
+  @$ = @1;
+  $$ = dispatch(object(stringtable.add_string("self")), $1, $3);
+}
 | IF expression THEN expression ELSE expression FI
-{@$ = @1;}
+{
+  @$ = @1;
+  $$ = cond($2, $4, $6);
+}
 | WHILE expression LOOP expression POOL
-{@$ = @1;}
+{
+  @$ = @1;
+  $$ = loop($2, $4);
+}
 | '{' expression_semi '}'
-{}
-| LET id_type_expr_darrow_list IN expression
-{@$ = @1;}
+{
+  @$ = @1;
+  $$ = block($2);
+}
+| LET OBJECTID ':' TYPEID init_expression IN expression
+{
+  @$ = @1;
+  $$ = let($2, $4, $5, $7);
+}
 | CASE expression OF id_type_expr_case_list ESAC
 {@$ = @1;}
 | NEW TYPEID
-{@$ = @1;}
+{
+  @$ = @1;
+  $$ = new_($2);
+}
 | ISVOID expression
-{@$ = @1;}
-| expression '+' expression
-{@$ = @2;}
-| expression '-' expression
-{@$ = @2;}
+{
+  @$ = @1;
+  $$ = isvoid($2);
+}
 | expression '*' expression
-{@$ = @2;}
+{
+  @$ = @2;
+  $$ = mul($1, $3);
+}
 | expression '/' expression
-{@$ = @2;}
+{
+  @$ = @2;
+  $$ = divide($1, $3);
+}
+| expression '+' expression
+{
+  @$ = @2;
+  $$ = plus($1, $3);
+}
+| expression '-' expression
+{
+  @$ = @2;
+  $$ = sub($1, $3);
+}
 | '~' expression
-{@$ = @1;}
+{
+  @$ = @1;
+  $$ = neg($2);
+}
 | expression '<' expression
-{@$ = @2;}
+{
+  @$ = @2;
+  $$ = lt($1, $3);
+}
 | expression '<=' expression
-{@$ = @2;}
+{
+  @$ = @2;
+  $$ = leq($1, $3);
+}
 | expression '=' expression
-{@$ = @2;}
+{
+  @$ = @2;
+  $$ = eq($1, $3);
+}
 | NOT expression
-{@$ = @1;}
+{
+  @$ = @1;
+  $$ = comp($2);
+}
 | '(' expression ')'
-{@$ = @1;}
+{
+  @$ = @1;
+  $$ = $2;
+}
 | OBJECTID
-{@$ = @1;}
+{
+  @$ = @1;
+  $$ = object($1);
+}
 | INT_CONST
-{@$ = @1;}
+{
+  @$ = @1;
+  $$ = int_const($1);
+}
 | STR_CONST
-{@$ = @1;}
+{
+  @$ = @1;
+  $$ = string_const($1);
+}
 | BOOL_CONST
-{@$ = @1;}
+{
+  @$ = @1;
+  $$ = bool_const($1);
+}
 ;
-
 
     
     
