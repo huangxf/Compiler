@@ -142,9 +142,11 @@
     %type <expression> expression
     %type <expression> id_type_expr_item
     %type <expression> id_type_expr_list
-    %type <expression> id_type_expr_case
+    %type <case_> id_type_expr_case
     %type <expression> init_expression
-    %type <expressions> id_type_expr_case_list
+    %type <expression> next_term
+    %type <expression> factor
+    %type <cases> id_type_expr_case_list
     %type <expressions> expression_list
     %type <expressions> expression_semi
     
@@ -181,20 +183,24 @@
 | feature ';' { $$ = single_Features($1); }
 | dummy_feature_list feature ';'  /* several features */
 { $$ = append_Features($1, single_Features($2)); }
+| error ';' {yyerrok; yyclearin; }
 ;
 
 feature : OBJECTID '(' formal_list ')' ':' TYPEID '{' expression '}'
 { @$ = @1;
   $$ = method($1, $3, $6, $8);
 }
-| OBJECTID ':' TYPEID ASSIGN expression
+| OBJECTID ':' TYPEID ASSIGN expression 
 { @$ = @1;
   $$ = attr($1, $3, $5);
 }
-| OBJECTID ':' TYPEID
+| OBJECTID ':' TYPEID 
 { @$ = @1;
   $$ = attr($1, $3, no_expr());
 }
+| error '(' formal_list ')' ':' TYPEID '{' expression '}' {yyerrok; yyclearin; } //continue after feature sytax error found.}
+| error ':' TYPEID {yyerrok; yyclearin; }
+| OBJECTID '(' formal_list ')' ':' TYPEID '{' error '}' {yyerrok; yyclearin; }
 ;
 
 formal_list : 
@@ -224,20 +230,21 @@ expression_semi : expression ';'
 {$$ = single_Expressions($1);}
 | expression_semi expression ';'
 {$$ = append_Expressions($1, single_Expressions($2));}
+| error ';'  {yyerrok; yyclearin; } //continue after expression sytax error found.
 ;
 
 init_expression :
-{$$ = no_expr();}
+{ SET_NODELOC(curr_lineno);$$ = no_expr();}
 | id_type_expr_list
-{$$ = $1;}
+{ @$ = @1; $$ = $1;}
 | ASSIGN expression
-{$$ = $2;}
+{ @$ = @1;$$ = $2;}
 | ASSIGN expression id_type_expr_list
-{$$ = $3;}
+{ @$ = @1;$$ = $3;}
 ;
 
 id_type_expr_item : 
-{$$ = no_expr();}
+{ SET_NODELOC(curr_lineno);$$ = no_expr();}
 | ',' OBJECTID ':' TYPEID
 { @$ = @1;
   $$ = object($2);
@@ -259,13 +266,34 @@ id_type_expr_item
 }
 
 id_type_expr_case_list: id_type_expr_case ';'
-{}
+{$$ = single_Cases($1);}
 | id_type_expr_case_list id_type_expr_case ';'
-{}
+{$$ = append_Cases($1, single_Cases($2));}
 ;
 
 id_type_expr_case: OBJECTID ':' TYPEID DARROW expression
-{@$ = @1;}
+{
+  @$ = @1;
+  $$ = branch($1, $3, $5);
+}
+;
+
+next_term: next_term '*' factor
+{$$ = mul($1, $3);}
+| next_term '/' factor
+{$$ = divide($1, $3);}
+| factor
+{$$ = $1;}
+;
+
+factor: '(' expression ')'
+{$$ = $2;}
+| INT_CONST
+{$$ = int_const($1); }
+| OBJECTID
+{$$ = object($1); }
+| expression
+{$$ = $1;}
 ;
 
 
@@ -309,7 +337,10 @@ expression : OBJECTID ASSIGN expression
   $$ = let($2, $4, $5, $7);
 }
 | CASE expression OF id_type_expr_case_list ESAC
-{@$ = @1;}
+{
+  @$ = @1;
+  $$ = typcase($2, $4);
+}
 | NEW TYPEID
 {
   @$ = @1;
@@ -320,26 +351,20 @@ expression : OBJECTID ASSIGN expression
   @$ = @1;
   $$ = isvoid($2);
 }
-| expression '*' expression
-{
-  @$ = @2;
-  $$ = mul($1, $3);
-}
-| expression '/' expression
-{
-  @$ = @2;
-  $$ = divide($1, $3);
-}
-| expression '+' expression
+| expression '+' next_term
 {
   @$ = @2;
   $$ = plus($1, $3);
 }
-| expression '-' expression
+| expression '-' next_term
 {
   @$ = @2;
   $$ = sub($1, $3);
 }
+| expression '*' factor
+{ $$ = mul($1, $3);}
+| expression '/' factor
+{ $$ = divide($1, $3);  }
 | '~' expression
 {
   @$ = @1;
