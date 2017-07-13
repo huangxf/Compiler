@@ -140,8 +140,6 @@
     %type <formals> formal_list
     %type <formal>   formal
     %type <expression> expression
-    %type <expression> id_type_expr_item
-    %type <expression> id_type_expr_list
     %type <case_> id_type_expr_case
     %type <expression> init_expression
     %type <expression> next_term
@@ -152,6 +150,15 @@
     
     /* Precedence declarations go here. */
     
+    %left ASSIGN
+    %left UNOT
+    %left '+' '-'
+    %nonassoc '=' '<' LE
+    %left '*' '/'
+    %left UISVOID
+    %left UNEG
+    %left '@'
+    %left '.'
     
     %%
     /* 
@@ -175,6 +182,7 @@
     stringtable.add_string(curr_filename)); }
     | CLASS TYPEID INHERITS TYPEID '{' dummy_feature_list '}' ';'
     { $$ = class_($2,$4,$6,stringtable.add_string(curr_filename)); }
+| error
     ;
     
     /* Feature list may be empty, but no empty features in list. */
@@ -183,7 +191,7 @@
 | feature ';' { $$ = single_Features($1); }
 | dummy_feature_list feature ';'  /* several features */
 { $$ = append_Features($1, single_Features($2)); }
-| error ';' {yyerrok; yyclearin; }
+| error ';' /* several features */
 ;
 
 feature : OBJECTID '(' formal_list ')' ':' TYPEID '{' expression '}'
@@ -198,9 +206,7 @@ feature : OBJECTID '(' formal_list ')' ':' TYPEID '{' expression '}'
 { @$ = @1;
   $$ = attr($1, $3, no_expr());
 }
-| error '(' formal_list ')' ':' TYPEID '{' expression '}' {yyerrok; yyclearin; } //continue after feature sytax error found.}
-| error ':' TYPEID {yyerrok; yyclearin; }
-| OBJECTID '(' formal_list ')' ':' TYPEID '{' error '}' {yyerrok; yyclearin; }
+| error
 ;
 
 formal_list : 
@@ -230,40 +236,26 @@ expression_semi : expression ';'
 {$$ = single_Expressions($1);}
 | expression_semi expression ';'
 {$$ = append_Expressions($1, single_Expressions($2));}
-| error ';'  {yyerrok; yyclearin; } //continue after expression sytax error found.
+|error ';' {yyerrok;}
 ;
 
 init_expression :
-{ SET_NODELOC(curr_lineno);$$ = no_expr();}
-| id_type_expr_list
-{ @$ = @1; $$ = $1;}
-| ASSIGN expression
-{ @$ = @1;$$ = $2;}
-| ASSIGN expression id_type_expr_list
-{ @$ = @1;$$ = $3;}
-;
-
-id_type_expr_item : 
-{ SET_NODELOC(curr_lineno);$$ = no_expr();}
-| ',' OBJECTID ':' TYPEID
+',' OBJECTID ':' TYPEID init_expression
 { @$ = @1;
-  $$ = object($2);
+  $$ = let($2, $4, no_expr(), $5);
 }
-| ','  OBJECTID ':' TYPEID ASSIGN expression
+| ','  OBJECTID ':' TYPEID ASSIGN expression init_expression
 { @$ = @1;
-  $$ = assign($2, $6);
+  $$ = let($2, $4, $6, $7);
 }
-;
-
-id_type_expr_list :
-id_type_expr_item 
+| IN expression
 {
-  $$ = $1;
-}
-| id_type_expr_list id_type_expr_item
-{
+  @$ = @1;
   $$ = $2;
 }
+| ',' error init_expression {;}
+| IN error
+;
 
 id_type_expr_case_list: id_type_expr_case ';'
 {$$ = single_Cases($1);}
@@ -301,10 +293,10 @@ expression : OBJECTID ASSIGN expression
 {@$ = @1;
   $$ = assign($1, $3);
 }
-| expression OBJECTID '@' TYPEID '.' OBJECTID  '(' expression_list ')'
+| expression '@' TYPEID '.' OBJECTID  '(' expression_list ')'
 {
   @$ = @1;
-  static_dispatch($1, $4, $6, $8);
+  $$ = static_dispatch($1, $3, $5, $7);
 }
 | expression '.' OBJECTID '(' expression_list ')'
 {
@@ -331,11 +323,17 @@ expression : OBJECTID ASSIGN expression
   @$ = @1;
   $$ = block($2);
 }
-| LET OBJECTID ':' TYPEID init_expression IN expression
+| LET OBJECTID ':' TYPEID ASSIGN expression init_expression
 {
-  @$ = @1;
-  $$ = let($2, $4, $5, $7);
+  @$ = @3;
+  $$ = let($2, $4, $6, $7);
 }
+| LET OBJECTID ':' TYPEID init_expression
+{
+  @$ = @3;
+  $$ = let($2, $4, no_expr(), $5);
+}
+| LET error init_expression {;}
 | CASE expression OF id_type_expr_case_list ESAC
 {
   @$ = @1;
@@ -346,7 +344,7 @@ expression : OBJECTID ASSIGN expression
   @$ = @1;
   $$ = new_($2);
 }
-| ISVOID expression
+| ISVOID expression %prec UISVOID
 {
   @$ = @1;
   $$ = isvoid($2);
@@ -365,7 +363,7 @@ expression : OBJECTID ASSIGN expression
 { $$ = mul($1, $3);}
 | expression '/' factor
 { $$ = divide($1, $3);  }
-| '~' expression
+| '~' expression %prec UNEG
 {
   @$ = @1;
   $$ = neg($2);
@@ -375,7 +373,7 @@ expression : OBJECTID ASSIGN expression
   @$ = @2;
   $$ = lt($1, $3);
 }
-| expression '<=' expression
+| expression LE expression
 {
   @$ = @2;
   $$ = leq($1, $3);
@@ -385,7 +383,7 @@ expression : OBJECTID ASSIGN expression
   @$ = @2;
   $$ = eq($1, $3);
 }
-| NOT expression
+| NOT expression %prec UNOT
 {
   @$ = @1;
   $$ = comp($2);
